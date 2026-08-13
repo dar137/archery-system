@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -14,11 +15,18 @@ import com.example.archerytimer.ui.ControlSetupScreen
 import com.example.archerytimer.ui.CountdownScreen
 import com.example.archerytimer.ui.DisplayScreen
 import com.example.archerytimer.ui.RoleSelectionScreen
+import com.example.archerytimer.ui.ControlMusicState
+import com.example.archerytimer.communication.FakeMusicControlTransport
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
+            val musicTransport = remember { FakeMusicControlTransport(applicationContext) }
+            val controlMusicState = remember(musicTransport) { ControlMusicState(musicTransport) }
+            DisposableEffect(musicTransport) {
+                onDispose { musicTransport.release() }
+            }
             MaterialTheme {
                 Surface {
                     var screen by remember { mutableStateOf<AppScreen>(AppScreen.RoleSelection) }
@@ -31,11 +39,16 @@ class MainActivity : ComponentActivity() {
 
                         AppScreen.ControlSetup -> ControlSetupScreen(
                             onConfirmed = { screen = AppScreen.Countdown(it) },
-                            onBack = { screen = AppScreen.RoleSelection },
+                            onBack = {
+                                controlMusicState.disconnect()
+                                screen = AppScreen.RoleSelection
+                            },
+                            controlMusic = controlMusicState,
                         )
 
                         is AppScreen.Countdown -> CountdownScreen(
                             config = current.config,
+                            controlMusic = controlMusicState,
                             onExitConfirmed = { screen = AppScreen.ControlSetup },
                         )
                         AppScreen.Display -> DisplayScreen(
@@ -46,6 +59,7 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
 }
 
 private sealed interface AppScreen {

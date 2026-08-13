@@ -22,6 +22,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -259,13 +262,16 @@ private fun GroupIndicator(label: String, active: Boolean) {
 fun ControlSetupScreen(
     onConfirmed: (ArcheryConfig) -> Unit,
     onBack: () -> Unit,
+    controlMusic: ControlMusicState,
 ) {
-    var totalArrows by remember { mutableStateOf("720") }
+    var totalArrows by remember { mutableStateOf("72") }
     var arrowsPerRound by remember { mutableStateOf("6") }
     var secondsPerArrow by remember { mutableStateOf("30") }
     var preparationSeconds by remember { mutableStateOf("10") }
     var firstLane by remember { mutableStateOf(Lane.AB) }
     var error by remember { mutableStateOf<String?>(null) }
+    val musicState by controlMusic.uiState.collectAsState(initial = ControlMusicUiState())
+    var showMusicDialog by remember { mutableStateOf(false) }
 
     BackHandler(onBack = onBack)
 
@@ -273,15 +279,20 @@ fun ControlSetupScreen(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            text = "←  返回",
-            color = Color.Black,
-            fontSize = 18.sp,
-            modifier = Modifier
-                .align(Alignment.Start)
-                .clickable(onClick = onBack)
-                .padding(vertical = 10.dp, horizontal = 4.dp),
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top,
+        ) {
+            Text(
+                text = "←  返回",
+                color = Color.Black,
+                fontSize = 18.sp,
+                modifier = Modifier.clickable(onClick = onBack)
+                    .padding(vertical = 10.dp, horizontal = 4.dp),
+            )
+            ControlMusicPanel(controlMusic, musicState) { showMusicDialog = true }
+        }
         Text("比赛参数设置", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(24.dp))
         NumberField("总箭数", totalArrows) { totalArrows = it }
@@ -325,6 +336,14 @@ fun ControlSetupScreen(
             Text("确定")
         }
     }
+
+    if (showMusicDialog) {
+        MusicLibraryDialog(
+            musicState = musicState,
+            controlMusic = controlMusic,
+            onDismiss = { showMusicDialog = false },
+        )
+    }
 }
 
 @Composable
@@ -342,11 +361,14 @@ private fun NumberField(label: String, value: String, onValueChange: (String) ->
 @Composable
 fun CountdownScreen(
     config: ArcheryConfig,
+    controlMusic: ControlMusicState,
     onExitConfirmed: () -> Unit,
 ) {
     val match = remember(config) { ArcheryMatchState(config) }
     var showExitDialog by remember { mutableStateOf(false) }
     var resumeAfterDialog by remember { mutableStateOf(false) }
+    val musicState by controlMusic.uiState.collectAsState(initial = ControlMusicUiState())
+    var showMusicDialog by remember { mutableStateOf(false) }
 
     fun requestExit() {
         if (showExitDialog) return
@@ -376,15 +398,21 @@ fun CountdownScreen(
         modifier = Modifier.fillMaxSize().background(PageBackground).padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            text = "←  返回",
-            color = Color.Black,
-            fontSize = 18.sp,
-            modifier = Modifier
-                .align(Alignment.Start)
-                .clickable(onClick = ::requestExit)
-                .padding(vertical = 10.dp, horizontal = 4.dp),
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top,
+        ) {
+            Text(
+                text = "←  返回",
+                color = Color.Black,
+                fontSize = 18.sp,
+                modifier = Modifier
+                    .clickable(onClick = ::requestExit)
+                    .padding(vertical = 10.dp, horizontal = 4.dp),
+            )
+            ControlMusicPanel(controlMusic, musicState) { showMusicDialog = true }
+        }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -455,6 +483,100 @@ fun CountdownScreen(
                 DialogButton("否", ::cancelExit)
             },
         )
+    }
+
+    if (showMusicDialog) {
+        MusicLibraryDialog(
+            musicState = musicState,
+            controlMusic = controlMusic,
+            onDismiss = { showMusicDialog = false },
+        )
+    }
+}
+
+@Composable
+private fun ControlMusicPanel(
+    controlMusic: ControlMusicState,
+    musicState: ControlMusicUiState,
+    onOpenLibrary: () -> Unit,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier.size(42.dp).clickable {
+                onOpenLibrary()
+                controlMusic.requestLibrary()
+            },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("♫", color = Color.Black, fontSize = 30.sp)
+        }
+        if (musicState.trackId != null) {
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier
+                    .background(Color(0xFFE8DEF8), RoundedCornerShape(15.dp))
+                    .padding(horizontal = 4.dp, vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                CompactMusicButton("|◀", "上一首", controlMusic::previous)
+                CompactMusicButton(
+                    if (musicState.isPlaying) "Ⅱ" else "▶",
+                    if (musicState.isPlaying) "暂停" else "继续",
+                ) { controlMusic.togglePlayback(musicState.isPlaying) }
+                CompactMusicButton("▶|", "下一首", controlMusic::next)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicLibraryDialog(
+    musicState: ControlMusicUiState,
+    controlMusic: ControlMusicState,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DialogBackground,
+        title = { Text("显示端本地音乐", color = Color.Black) },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 440.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                when {
+                    musicState.error != null -> Text(musicState.error ?: "加载失败", color = Color.Black)
+                    !musicState.libraryLoaded -> Text("正在加载…", color = Color.Black)
+                    musicState.tracks.isEmpty() -> Text("显示端没有可用的本地音乐", color = Color.Black)
+                    else -> musicState.tracks.forEach { track ->
+                        Text(
+                            text = "${track.title} · ${track.artist}",
+                            color = Color.Black,
+                            modifier = Modifier.fillMaxWidth()
+                                .clickable { controlMusic.play(track.trackId) }
+                                .padding(vertical = 10.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { DialogButton("关闭", onDismiss) },
+    )
+}
+
+@Composable
+private fun CompactMusicButton(symbol: String, description: String, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = ButtonBackground,
+            contentColor = Color.White,
+        ),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+        modifier = Modifier.size(31.dp),
+        shape = CircleShape,
+    ) {
+        Text(symbol, color = Color.White, fontSize = 12.sp)
     }
 }
 
