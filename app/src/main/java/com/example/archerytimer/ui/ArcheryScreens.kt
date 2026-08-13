@@ -4,6 +4,8 @@ import android.app.Activity
 import android.Manifest
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.bluetooth.BluetoothAdapter
+import android.content.Intent
 import android.os.Build
 import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -57,7 +59,7 @@ import com.example.archerytimer.model.CountdownPhase
 import com.example.archerytimer.model.Lane
 import com.example.archerytimer.model.TimerState
 import com.example.archerytimer.communication.ConnectionState
-import com.example.archerytimer.communication.FakeDisplayTransport
+import com.example.archerytimer.communication.BluetoothTransport
 import com.example.archerytimer.communication.RemoteMatchPhase
 import com.example.archerytimer.communication.ShootingGroup
 import com.example.archerytimer.audio.BeepPlayer
@@ -89,7 +91,47 @@ fun RoleSelectionScreen(
 }
 
 @Composable
-fun DisplayScreen(onBack: () -> Unit) {
+fun BluetoothMatchingScreen(
+    bluetoothTransport: BluetoothTransport,
+    onConnected: () -> Unit,
+    onBack: () -> Unit,
+) {
+    val state by bluetoothTransport.uiState.collectAsState()
+    BackHandler(onBack = onBack)
+    LaunchedEffect(Unit) { bluetoothTransport.startDiscovery() }
+    LaunchedEffect(state.connectionState) {
+        if (state.connectionState == ConnectionState.CONNECTED) onConnected()
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("←  返回", modifier = Modifier.align(Alignment.Start).clickable(onClick = onBack)
+            .padding(vertical = 10.dp))
+        Text("选择显示端", style = MaterialTheme.typography.headlineMedium)
+        Text(if (state.scanning) "正在搜索附近设备…" else "搜索完成", modifier = Modifier.padding(12.dp))
+        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        Column(
+            modifier = Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
+        ) {
+            state.devices.forEach { device ->
+                Text(
+                    text = "${device.name}${if (device.bonded) "（已配对）" else ""}\n${device.address}",
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        bluetoothTransport.pairAndConnect(device.address)
+                    }.padding(vertical = 14.dp),
+                )
+            }
+        }
+        Button(onClick = bluetoothTransport::startDiscovery, modifier = Modifier.fillMaxWidth()) {
+            Text("重新搜索")
+        }
+    }
+}
+
+@Composable
+fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
     val activity = LocalContext.current as? Activity
     val context = LocalContext.current
     val audioPermission = if (Build.VERSION.SDK_INT >= 33) {
@@ -105,6 +147,9 @@ fun DisplayScreen(onBack: () -> Unit) {
     ) {
         permissionResolved = true
     }
+    val discoverableLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { }
 
     LaunchedEffect(audioPermission) {
         if (!permissionResolved) permissionLauncher.launch(audioPermission)
@@ -120,7 +165,7 @@ fun DisplayScreen(onBack: () -> Unit) {
         return
     }
 
-    val transport = remember { FakeDisplayTransport() }
+    val transport = bluetoothTransport
     val viewModel = remember { DisplayViewModel(transport) }
     val musicHandler = remember {
         MusicCommandHandler(
@@ -148,6 +193,13 @@ fun DisplayScreen(onBack: () -> Unit) {
     }
     DisposableEffect(activity) {
         viewModel.onMusicCommand = musicHandler::handle
+        bluetoothTransport.startDisplayServer()
+        discoverableLauncher.launch(
+            Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).putExtra(
+                BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION,
+                300,
+            ),
+        )
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose {
@@ -156,6 +208,7 @@ fun DisplayScreen(onBack: () -> Unit) {
             beepPlayer.release()
             viewModel.onMusicCommand = {}
             musicHandler.release()
+            bluetoothTransport.disconnect()
         }
     }
 
@@ -263,6 +316,7 @@ fun ControlSetupScreen(
     onConfirmed: (ArcheryConfig) -> Unit,
     onBack: () -> Unit,
     controlMusic: ControlMusicState,
+    bluetoothTransport: BluetoothTransport,
 ) {
     var totalArrows by remember { mutableStateOf("72") }
     var arrowsPerRound by remember { mutableStateOf("6") }
@@ -362,6 +416,7 @@ private fun NumberField(label: String, value: String, onValueChange: (String) ->
 fun CountdownScreen(
     config: ArcheryConfig,
     controlMusic: ControlMusicState,
+    bluetoothTransport: BluetoothTransport,
     onExitConfirmed: () -> Unit,
 ) {
     val match = remember(config) { ArcheryMatchState(config) }
@@ -392,6 +447,35 @@ fun CountdownScreen(
                 match.tick()
             }
         }
+    }
+
+    var remoteSequence by remember { mutableStateOf(0L) }
+    LaunchedEffect(
+        match.timerState,
+        match.countdownPhase,
+        match.remainingSeconds,
+        match.currentLane,
+    ) {
+        val phase = when (match.timerState) {
+            TimerState.READY -> RemoteMatchPhase.WAITING
+            TimerState.COUNTING -> if (match.countdownPhase == CountdownPhase.PREPARATION) {
+                RemoteMatchPhase.PREPARATION
+            } else RemoteMatchPhase.SHOOTING
+            TimerState.PAUSED -> RemoteMatchPhase.PAUSED
+            TimerState.WAITING_FOR_CONTINUE -> RemoteMatchPhase.PULL_ARROWS
+            TimerState.FINISHED -> RemoteMatchPhase.FINISHED
+        }
+        val group = if (phase == RemoteMatchPhase.PREPARATION || phase == RemoteMatchPhase.SHOOTING) {
+            if (match.currentLane == Lane.AB) ShootingGroup.AB else ShootingGroup.CD
+        } else ShootingGroup.NONE
+        bluetoothTransport.sendMatch(
+            com.example.archerytimer.communication.RemoteMatchState(
+                sequence = ++remoteSequence,
+                phase = phase,
+                activeGroup = group,
+                remainingMillis = match.remainingSeconds * 1_000L,
+            ),
+        )
     }
 
     Column(
