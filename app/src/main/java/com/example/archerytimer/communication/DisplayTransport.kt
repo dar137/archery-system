@@ -4,4 +4,5 @@ import kotlinx.coroutines.flow.Flow
 
 interface DisplayTransport {
     fun messages(): Flow<DisplayMessage>
+    fun send(response: MusicResponse)
 }

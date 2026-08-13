@@ -1,8 +1,13 @@
 package com.example.archerytimer.ui
 
 import android.app.Activity
+import android.Manifest
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
+import android.os.Build
 import android.view.WindowManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -52,6 +57,10 @@ import com.example.archerytimer.communication.ConnectionState
 import com.example.archerytimer.communication.FakeDisplayTransport
 import com.example.archerytimer.communication.RemoteMatchPhase
 import com.example.archerytimer.communication.ShootingGroup
+import com.example.archerytimer.audio.BeepPlayer
+import com.example.archerytimer.music.DisplayMusicPlayer
+import com.example.archerytimer.music.LocalMusicRepository
+import com.example.archerytimer.music.MusicCommandHandler
 import kotlinx.coroutines.delay
 
 @Composable
@@ -79,17 +88,71 @@ fun RoleSelectionScreen(
 @Composable
 fun DisplayScreen(onBack: () -> Unit) {
     val activity = LocalContext.current as? Activity
-    val viewModel = remember { DisplayViewModel(FakeDisplayTransport()) }
+    val context = LocalContext.current
+    val audioPermission = if (Build.VERSION.SDK_INT >= 33) {
+        Manifest.permission.READ_MEDIA_AUDIO
+    } else {
+        Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+    var permissionResolved by remember {
+        mutableStateOf(context.checkSelfPermission(audioPermission) == PackageManager.PERMISSION_GRANTED)
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        permissionResolved = true
+    }
+
+    LaunchedEffect(audioPermission) {
+        if (!permissionResolved) permissionLauncher.launch(audioPermission)
+    }
+
+    if (!permissionResolved) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(DisplayBackground),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("正在请求本地音乐权限", color = Color.White, fontSize = 28.sp)
+        }
+        return
+    }
+
+    val transport = remember { FakeDisplayTransport() }
+    val viewModel = remember { DisplayViewModel(transport) }
+    val musicHandler = remember {
+        MusicCommandHandler(
+            LocalMusicRepository(context.applicationContext),
+            DisplayMusicPlayer(context.applicationContext),
+            transport,
+        )
+    }
+    val beepPlayer = remember { BeepPlayer() }
     val uiState by viewModel.uiState.collectAsState(initial = DisplayUiState())
     var showExitDialog by remember { mutableStateOf(false) }
 
     BackHandler { showExitDialog = true }
+    LaunchedEffect(uiState.beepEventId) {
+        if (uiState.beepEventId > 0L) {
+            musicHandler.setMusicDucked(true)
+            try {
+                delay(80)
+                beepPlayer.play()
+                delay(380)
+            } finally {
+                musicHandler.setMusicDucked(false)
+            }
+        }
+    }
     DisposableEffect(activity) {
+        viewModel.onMusicCommand = musicHandler::handle
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose {
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            beepPlayer.release()
+            viewModel.onMusicCommand = {}
+            musicHandler.release()
         }
     }
 
@@ -389,7 +452,7 @@ fun CountdownScreen(
                 DialogButton("是", onExitConfirmed)
             },
             dismissButton = {
-                DialogButton("否，让箭再飞一会", ::cancelExit)
+                DialogButton("否", ::cancelExit)
             },
         )
     }
