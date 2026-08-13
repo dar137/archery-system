@@ -15,20 +15,41 @@ class ArcheryMatchState(val config: ArcheryConfig) {
     var currentLane by mutableStateOf(firstLaneForRound(1))
         private set
 
-    var remainingSeconds by mutableIntStateOf(config.countdownSeconds)
+    var countdownPhase by mutableStateOf(initialPhase())
+        private set
+
+    var remainingSeconds by mutableIntStateOf(initialSeconds())
         private set
 
     var timerState by mutableStateOf(TimerState.READY)
         private set
 
     fun start() {
-        if (timerState == TimerState.READY) timerState = TimerState.COUNTING
+        if (timerState == TimerState.READY) {
+            beginCurrentShot()
+        }
+    }
+
+    fun pause() {
+        if (timerState == TimerState.COUNTING) timerState = TimerState.PAUSED
+    }
+
+    fun resume() {
+        if (timerState == TimerState.PAUSED) timerState = TimerState.COUNTING
+    }
+
+    fun restartCurrentShot() {
+        if (timerState != TimerState.PAUSED) return
+        beginCurrentShot()
     }
 
     fun tick() {
         if (timerState != TimerState.COUNTING) return
         if (remainingSeconds > 1) {
             remainingSeconds--
+        } else if (countdownPhase == CountdownPhase.PREPARATION) {
+            countdownPhase = CountdownPhase.SHOOTING
+            remainingSeconds = config.countdownSeconds
         } else {
             remainingSeconds = 0
             timerState = TimerState.WAITING_FOR_CONTINUE
@@ -41,7 +62,7 @@ class ArcheryMatchState(val config: ArcheryConfig) {
         if (currentShotInRound == 0) {
             currentShotInRound = 1
             currentLane = firstLaneForRound(currentRound).other()
-        } else if (currentRound < config.totalRounds) {
+        } else if (currentRound < config.rounds) {
             currentRound++
             currentShotInRound = 0
             currentLane = firstLaneForRound(currentRound)
@@ -50,9 +71,20 @@ class ArcheryMatchState(val config: ArcheryConfig) {
             return
         }
 
-        remainingSeconds = config.countdownSeconds
+        beginCurrentShot()
+    }
+
+    private fun beginCurrentShot() {
+        countdownPhase = initialPhase()
+        remainingSeconds = initialSeconds()
         timerState = TimerState.COUNTING
     }
+
+    private fun initialPhase(): CountdownPhase =
+        if (config.preparationSeconds > 0) CountdownPhase.PREPARATION else CountdownPhase.SHOOTING
+
+    private fun initialSeconds(): Int =
+        if (config.preparationSeconds > 0) config.preparationSeconds else config.countdownSeconds
 
     private fun firstLaneForRound(round: Int): Lane =
         if (round % 2 == 1) config.firstLane else config.firstLane.other()

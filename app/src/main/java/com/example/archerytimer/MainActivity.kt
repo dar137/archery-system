@@ -31,10 +31,16 @@ class MainActivity : ComponentActivity() {
 
                         AppScreen.ControlSetup -> ControlSetupScreen(
                             onConfirmed = { screen = AppScreen.Countdown(it) },
+                            onBack = { screen = AppScreen.RoleSelection },
                         )
 
-                        is AppScreen.Countdown -> CountdownScreen(config = current.config)
-                        AppScreen.Display -> DisplayScreen()
+                        is AppScreen.Countdown -> CountdownScreen(
+                            config = current.config,
+                            onExitConfirmed = { screen = AppScreen.ControlSetup },
+                        )
+                        AppScreen.Display -> DisplayScreen(
+                            onBack = { screen = AppScreen.RoleSelection },
+                        )
                     }
                 }
             }
