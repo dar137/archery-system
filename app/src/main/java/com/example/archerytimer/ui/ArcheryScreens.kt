@@ -17,6 +17,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -50,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -234,21 +237,31 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().background(DisplayBackground).padding(24.dp),
+        modifier = Modifier.fillMaxSize().background(DisplayBackground).padding(12.dp),
     ) {
         Box(
-            modifier = Modifier.fillMaxWidth().weight(1f),
+            modifier = Modifier.fillMaxWidth().weight(4.5f).offset(y = (-10).dp),
             contentAlignment = Alignment.Center,
         ) {
             DisplayCenterContent(uiState, showMatchedSuccess)
         }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 72.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            contentAlignment = Alignment.Center,
         ) {
-            GroupIndicator("AB", activeGroup == ShootingGroup.AB)
-            GroupIndicator("CD", activeGroup == ShootingGroup.CD)
+            val lightSize = minOf(maxHeight * 0.90f, maxWidth * 0.075f)
+            val labelSize = minOf(maxHeight.value * 0.96f, maxWidth.value * 0.085f).sp
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    GroupIndicator("AB", activeGroup == ShootingGroup.AB, lightSize, labelSize)
+                }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    GroupIndicator("CD", activeGroup == ShootingGroup.CD, lightSize, labelSize)
+                }
+            }
         }
     }
 
@@ -270,14 +283,12 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
 private fun DisplayCenterContent(uiState: DisplayUiState, showMatchedSuccess: Boolean) {
     val state = uiState.matchState
     if (showMatchedSuccess || uiState.connectionState != ConnectionState.CONNECTED) {
-        Text(
-            text = if (showMatchedSuccess || uiState.connectionState == ConnectionState.MATCHED) {
+        DisplayStatusText(
+            if (showMatchedSuccess || uiState.connectionState == ConnectionState.MATCHED) {
                 "匹配成功"
             } else {
                 "匹配中"
             },
-            color = Color.White,
-            fontSize = 64.sp,
         )
         return
     }
@@ -315,28 +326,54 @@ private fun RemoteCountdown(
     val color = if (preparation) PreparationOrange else {
         if (displayedMillis <= 10_000L) DisplayRed else DisplayGreen
     }
-    Text(
-        text = seconds.toString().padStart(3, '0'),
-        color = color,
-        fontSize = 180.sp,
-        textAlign = TextAlign.Center,
-    )
+    BoxWithConstraints(
+        Modifier.fillMaxSize().offset(y = (-18).dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        val countdownSize = minOf(maxHeight.value * 0.92f, maxWidth.value * 0.54f).sp
+        Text(
+            text = seconds.toString().padStart(3, '0'),
+            color = color,
+            fontSize = countdownSize,
+            fontWeight = FontWeight.Bold,
+            lineHeight = countdownSize,
+            maxLines = 1,
+            textAlign = TextAlign.Center,
+        )
+    }
 }
 
 @Composable
 private fun DisplayStatusText(text: String) {
-    Text(text = text, color = Color.White, fontSize = 64.sp, textAlign = TextAlign.Center)
+    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val widthLimitedSize = maxWidth.value / (text.length.coerceAtLeast(2) * 1.12f)
+        val statusSize = minOf(maxHeight.value * 0.50f, widthLimitedSize).sp
+        Text(
+            text = text,
+            color = Color.White,
+            fontSize = statusSize,
+            fontWeight = FontWeight.Bold,
+            lineHeight = statusSize,
+            maxLines = 1,
+            textAlign = TextAlign.Center,
+        )
+    }
 }
 
 @Composable
-private fun GroupIndicator(label: String, active: Boolean) {
+private fun GroupIndicator(
+    label: String,
+    active: Boolean,
+    lightSize: androidx.compose.ui.unit.Dp = 28.dp,
+    labelSize: androidx.compose.ui.unit.TextUnit = 40.sp,
+) {
     val color = if (active) DisplayGreen else DisplayInactive
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Box(Modifier.size(28.dp).background(color, CircleShape))
-        Text(text = label, color = color, fontSize = 40.sp)
+        Box(Modifier.size(lightSize).background(color, CircleShape))
+        Text(text = label, color = color, fontSize = labelSize, fontWeight = FontWeight.Bold)
     }
 }
 
