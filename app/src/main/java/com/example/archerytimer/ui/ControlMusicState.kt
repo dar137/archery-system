@@ -5,7 +5,13 @@ import com.example.archerytimer.communication.MusicControlTransport
 import com.example.archerytimer.communication.MusicResponse
 import com.example.archerytimer.communication.MusicTrackMetadata
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.scan
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 data class ControlMusicUiState(
     val tracks: List<MusicTrackMetadata> = emptyList(),
@@ -17,19 +23,27 @@ data class ControlMusicUiState(
 )
 
 class ControlMusicState(private val transport: MusicControlTransport) {
-    val uiState: Flow<ControlMusicUiState> = transport.responses.scan(ControlMusicUiState()) { state, response ->
-        when (response) {
-            is MusicResponse.Library -> state.copy(
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val state = MutableStateFlow(ControlMusicUiState())
+    val uiState: StateFlow<ControlMusicUiState> = state.asStateFlow()
+
+    init {
+        scope.launch {
+            transport.responses.collect { response ->
+                state.value = when (response) {
+                    is MusicResponse.Library -> state.value.copy(
                 tracks = response.tracks,
                 error = response.error,
                 libraryLoaded = true,
             )
-            is MusicResponse.State -> state.copy(
+                    is MusicResponse.State -> state.value.copy(
                 trackId = response.trackId,
                 title = response.title,
                 isPlaying = response.isPlaying,
                 error = response.error,
             )
+                }
+            }
         }
     }
 

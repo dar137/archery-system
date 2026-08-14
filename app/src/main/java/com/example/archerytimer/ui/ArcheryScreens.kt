@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.bluetooth.BluetoothAdapter
 import android.content.Intent
 import android.os.Build
+import android.os.SystemClock
 import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -177,8 +178,18 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
     val beepPlayer = remember { BeepPlayer() }
     val uiState by viewModel.uiState.collectAsState(initial = DisplayUiState())
     var showExitDialog by remember { mutableStateOf(false) }
+    var showMatchedSuccess by remember { mutableStateOf(false) }
 
     BackHandler { showExitDialog = true }
+    LaunchedEffect(uiState.connectionState) {
+        if (uiState.connectionState == ConnectionState.CONNECTED) {
+            showMatchedSuccess = true
+            delay(1_500)
+            showMatchedSuccess = false
+        } else {
+            showMatchedSuccess = false
+        }
+    }
     LaunchedEffect(uiState.beepEventId) {
         if (uiState.beepEventId > 0L) {
             musicHandler.setMusicDucked(true)
@@ -229,7 +240,7 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
             modifier = Modifier.fillMaxWidth().weight(1f),
             contentAlignment = Alignment.Center,
         ) {
-            DisplayCenterContent(uiState)
+            DisplayCenterContent(uiState, showMatchedSuccess)
         }
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 72.dp, vertical = 8.dp),
@@ -256,26 +267,29 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
 }
 
 @Composable
-private fun DisplayCenterContent(uiState: DisplayUiState) {
+private fun DisplayCenterContent(uiState: DisplayUiState, showMatchedSuccess: Boolean) {
     val state = uiState.matchState
-    if (uiState.connectionState != ConnectionState.CONNECTED || state == null) {
+    if (showMatchedSuccess || uiState.connectionState != ConnectionState.CONNECTED) {
         Text(
-            text = if (uiState.connectionState == ConnectionState.MATCHED) "匹配成功" else "匹配中",
+            text = if (showMatchedSuccess || uiState.connectionState == ConnectionState.MATCHED) {
+                "匹配成功"
+            } else {
+                "匹配中"
+            },
             color = Color.White,
             fontSize = 64.sp,
         )
         return
     }
 
+    if (state == null) {
+        DisplayStatusText("比赛待开始")
+        return
+    }
+
     when (state.phase) {
-        RemoteMatchPhase.PREPARATION -> RemoteCountdown(
-            state.remainingMillis,
-            PreparationOrange,
-        )
-        RemoteMatchPhase.SHOOTING -> RemoteCountdown(
-            state.remainingMillis,
-            if (state.remainingMillis <= 10_000L) DisplayRed else DisplayGreen,
-        )
+        RemoteMatchPhase.PREPARATION -> RemoteCountdown(state, preparation = true)
+        RemoteMatchPhase.SHOOTING -> RemoteCountdown(state, preparation = false)
         RemoteMatchPhase.WAITING -> DisplayStatusText("比赛待开始")
         RemoteMatchPhase.PAUSED -> DisplayStatusText("暂停中")
         RemoteMatchPhase.PULL_ARROWS -> DisplayStatusText("请拔箭")
@@ -284,8 +298,23 @@ private fun DisplayCenterContent(uiState: DisplayUiState) {
 }
 
 @Composable
-private fun RemoteCountdown(remainingMillis: Long, color: Color) {
-    val seconds = (remainingMillis.coerceAtLeast(0L) + 999L) / 1_000L
+private fun RemoteCountdown(
+    state: com.example.archerytimer.communication.RemoteMatchState,
+    preparation: Boolean,
+) {
+    var displayedMillis by remember(state.sequence) { mutableStateOf(state.remainingMillis) }
+    LaunchedEffect(state.sequence) {
+        val receivedAt = SystemClock.elapsedRealtime()
+        while (true) {
+            val elapsed = SystemClock.elapsedRealtime() - receivedAt
+            displayedMillis = (state.remainingMillis - elapsed).coerceAtLeast(0L)
+            delay(100)
+        }
+    }
+    val seconds = (displayedMillis + 999L) / 1_000L
+    val color = if (preparation) PreparationOrange else {
+        if (displayedMillis <= 10_000L) DisplayRed else DisplayGreen
+    }
     Text(
         text = seconds.toString().padStart(3, '0'),
         color = color,
@@ -449,7 +478,6 @@ fun CountdownScreen(
         }
     }
 
-    var remoteSequence by remember { mutableStateOf(0L) }
     LaunchedEffect(
         match.timerState,
         match.countdownPhase,
@@ -470,7 +498,7 @@ fun CountdownScreen(
         } else ShootingGroup.NONE
         bluetoothTransport.sendMatch(
             com.example.archerytimer.communication.RemoteMatchState(
-                sequence = ++remoteSequence,
+                sequence = 0L,
                 phase = phase,
                 activeGroup = group,
                 remainingMillis = match.remainingSeconds * 1_000L,

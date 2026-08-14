@@ -23,11 +23,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 
 data class NearbyBluetoothDevice(val name: String, val address: String, val bonded: Boolean)
 
@@ -48,6 +50,9 @@ class BluetoothTransport(context: Context) : DisplayTransport, MusicControlTrans
     private var socket: BluetoothSocket? = null
     private var serverSocket: BluetoothServerSocket? = null
     private var readerJob: Job? = null
+    private val outgoing = Channel<String>(Channel.UNLIMITED)
+    private var writerJob: Job? = null
+    private val matchSequence = AtomicLong(0L)
     private val stateFlow = MutableStateFlow(BluetoothUiState())
     val uiState: StateFlow<BluetoothUiState> = stateFlow.asStateFlow()
     private var pendingConnectAddress: String? = null
@@ -163,6 +168,14 @@ class BluetoothTransport(context: Context) : DisplayTransport, MusicControlTrans
         displayFlow.tryEmit(DisplayMessage.ConnectionChanged(ConnectionState.MATCHED))
         displayFlow.tryEmit(DisplayMessage.ConnectionChanged(ConnectionState.CONNECTED))
         stateFlow.value = stateFlow.value.copy(connectionState = ConnectionState.CONNECTED, scanning = false, error = null)
+        writerJob = scope.launch {
+            val writer = BufferedWriter(OutputStreamWriter(newSocket.outputStream, Charsets.UTF_8))
+            for (line in outgoing) {
+                writer.write(line)
+                writer.newLine()
+                writer.flush()
+            }
+        }
         readerJob = scope.launch {
             val reader = BufferedReader(InputStreamReader(newSocket.inputStream, Charsets.UTF_8))
             while (true) {
@@ -174,24 +187,20 @@ class BluetoothTransport(context: Context) : DisplayTransport, MusicControlTrans
         }
     }
 
-    fun sendMatch(state: RemoteMatchState) = write(BluetoothMessageCodec.encodeMatch(state))
+    fun sendMatch(state: RemoteMatchState) = write(
+        BluetoothMessageCodec.encodeMatch(state.copy(sequence = matchSequence.incrementAndGet())),
+    )
     override fun send(command: MusicCommand) = write(BluetoothMessageCodec.encodeCommand(command))
     override fun send(response: MusicResponse) = write(BluetoothMessageCodec.encodeResponse(response))
 
     @Synchronized
     private fun write(line: String) {
-        val activeSocket = socket ?: return
-        scope.launch {
-            runCatching {
-                BufferedWriter(OutputStreamWriter(activeSocket.outputStream, Charsets.UTF_8)).apply {
-                    write(line); newLine(); flush()
-                }
-            }
-        }
+        if (socket != null) outgoing.trySend(line)
     }
 
     override fun disconnect() {
         readerJob?.cancel(); readerJob = null
+        writerJob?.cancel(); writerJob = null
         runCatching { socket?.close() }; socket = null
         runCatching { serverSocket?.close() }; serverSocket = null
         stateFlow.value = stateFlow.value.copy(connectionState = ConnectionState.MATCHING)
