@@ -240,7 +240,7 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
         modifier = Modifier.fillMaxSize().background(DisplayBackground).padding(12.dp),
     ) {
         Box(
-            modifier = Modifier.fillMaxWidth().weight(4.5f).offset(y = (-10).dp),
+            modifier = Modifier.fillMaxWidth().weight(4.3f).offset(y = (-10).dp),
             contentAlignment = Alignment.Center,
         ) {
             DisplayCenterContent(uiState, showMatchedSuccess)
@@ -249,8 +249,8 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
             modifier = Modifier.fillMaxWidth().weight(1f),
             contentAlignment = Alignment.Center,
         ) {
-            val lightSize = minOf(maxHeight * 0.90f, maxWidth * 0.075f)
-            val labelSize = minOf(maxHeight.value * 0.96f, maxWidth.value * 0.085f).sp
+            val lightSize = minOf(maxHeight * 0.98f, maxWidth * 0.085f)
+            val labelSize = minOf(maxHeight.value * 1.02f, maxWidth.value * 0.095f).sp
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -327,10 +327,10 @@ private fun RemoteCountdown(
         if (displayedMillis <= 10_000L) DisplayRed else DisplayGreen
     }
     BoxWithConstraints(
-        Modifier.fillMaxSize().offset(y = (-18).dp),
+        Modifier.fillMaxSize().offset(y = (-34).dp),
         contentAlignment = Alignment.Center,
     ) {
-        val countdownSize = minOf(maxHeight.value * 0.92f, maxWidth.value * 0.54f).sp
+        val countdownSize = minOf(maxHeight.value * 0.98f, maxWidth.value * 0.62f).sp
         Text(
             text = seconds.toString().padStart(3, '0'),
             color = color,
