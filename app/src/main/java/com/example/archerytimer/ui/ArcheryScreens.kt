@@ -227,6 +227,37 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
     }
 
     val remoteState = uiState.matchState
+    var firstGroupFinished by remember { mutableStateOf(false) }
+    var pullArrowsText by remember { mutableStateOf("请拔箭") }
+    var previousRemoteState by remember {
+        mutableStateOf<com.example.archerytimer.communication.RemoteMatchState?>(null)
+    }
+    LaunchedEffect(remoteState?.sequence) {
+        val current = remoteState ?: return@LaunchedEffect
+        val previous = previousRemoteState
+        if (current.phase == RemoteMatchPhase.WAITING) {
+            // A waiting state starts a fresh match, so discard the previous
+            // match's display-only first/second-group marker.
+            firstGroupFinished = false
+            pullArrowsText = "请拔箭"
+        } else if (
+            current.phase == RemoteMatchPhase.PULL_ARROWS &&
+            previous?.phase == RemoteMatchPhase.SHOOTING
+        ) {
+            if (firstGroupFinished) {
+                pullArrowsText = "请拔箭"
+                firstGroupFinished = false
+            } else {
+                pullArrowsText = if (previous.activeGroup == ShootingGroup.AB) {
+                    "CD准备"
+                } else {
+                    "AB准备"
+                }
+                firstGroupFinished = true
+            }
+        }
+        previousRemoteState = current
+    }
     val activeGroup = if (
         remoteState?.phase == RemoteMatchPhase.PREPARATION ||
         remoteState?.phase == RemoteMatchPhase.SHOOTING
@@ -243,7 +274,7 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
             modifier = Modifier.fillMaxWidth().weight(4.3f).offset(y = (-10).dp),
             contentAlignment = Alignment.Center,
         ) {
-            DisplayCenterContent(uiState, showMatchedSuccess)
+            DisplayCenterContent(uiState, showMatchedSuccess, pullArrowsText)
         }
         BoxWithConstraints(
             modifier = Modifier.fillMaxWidth().weight(1f),
@@ -280,7 +311,11 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
 }
 
 @Composable
-private fun DisplayCenterContent(uiState: DisplayUiState, showMatchedSuccess: Boolean) {
+private fun DisplayCenterContent(
+    uiState: DisplayUiState,
+    showMatchedSuccess: Boolean,
+    pullArrowsText: String,
+) {
     val state = uiState.matchState
     if (showMatchedSuccess || uiState.connectionState != ConnectionState.CONNECTED) {
         DisplayStatusText(
@@ -303,7 +338,7 @@ private fun DisplayCenterContent(uiState: DisplayUiState, showMatchedSuccess: Bo
         RemoteMatchPhase.SHOOTING -> RemoteCountdown(state, preparation = false)
         RemoteMatchPhase.WAITING -> DisplayStatusText("比赛待开始")
         RemoteMatchPhase.PAUSED -> DisplayStatusText("暂停中")
-        RemoteMatchPhase.PULL_ARROWS -> DisplayStatusText("请拔箭")
+        RemoteMatchPhase.PULL_ARROWS -> DisplayStatusText(pullArrowsText)
         RemoteMatchPhase.FINISHED -> DisplayStatusText("比赛结束")
     }
 }
