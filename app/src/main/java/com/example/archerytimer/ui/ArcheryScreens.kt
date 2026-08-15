@@ -227,37 +227,6 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
     }
 
     val remoteState = uiState.matchState
-    var firstGroupFinished by remember { mutableStateOf(false) }
-    var pullArrowsText by remember { mutableStateOf("请拔箭") }
-    var previousRemoteState by remember {
-        mutableStateOf<com.example.archerytimer.communication.RemoteMatchState?>(null)
-    }
-    LaunchedEffect(remoteState?.sequence) {
-        val current = remoteState ?: return@LaunchedEffect
-        val previous = previousRemoteState
-        if (current.phase == RemoteMatchPhase.WAITING) {
-            // A waiting state starts a fresh match, so discard the previous
-            // match's display-only first/second-group marker.
-            firstGroupFinished = false
-            pullArrowsText = "请拔箭"
-        } else if (
-            current.phase == RemoteMatchPhase.PULL_ARROWS &&
-            previous?.phase == RemoteMatchPhase.SHOOTING
-        ) {
-            if (firstGroupFinished) {
-                pullArrowsText = "请拔箭"
-                firstGroupFinished = false
-            } else {
-                pullArrowsText = if (previous.activeGroup == ShootingGroup.AB) {
-                    "CD准备"
-                } else {
-                    "AB准备"
-                }
-                firstGroupFinished = true
-            }
-        }
-        previousRemoteState = current
-    }
     val activeGroup = if (
         remoteState?.phase == RemoteMatchPhase.PREPARATION ||
         remoteState?.phase == RemoteMatchPhase.SHOOTING
@@ -274,7 +243,7 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
             modifier = Modifier.fillMaxWidth().weight(4.3f).offset(y = (-10).dp),
             contentAlignment = Alignment.Center,
         ) {
-            DisplayCenterContent(uiState, showMatchedSuccess, pullArrowsText)
+            DisplayCenterContent(uiState, showMatchedSuccess)
         }
         BoxWithConstraints(
             modifier = Modifier.fillMaxWidth().weight(1f),
@@ -314,7 +283,6 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
 private fun DisplayCenterContent(
     uiState: DisplayUiState,
     showMatchedSuccess: Boolean,
-    pullArrowsText: String,
 ) {
     val state = uiState.matchState
     if (showMatchedSuccess || uiState.connectionState != ConnectionState.CONNECTED) {
@@ -338,7 +306,13 @@ private fun DisplayCenterContent(
         RemoteMatchPhase.SHOOTING -> RemoteCountdown(state, preparation = false)
         RemoteMatchPhase.WAITING -> DisplayStatusText("比赛待开始")
         RemoteMatchPhase.PAUSED -> DisplayStatusText("暂停中")
-        RemoteMatchPhase.PULL_ARROWS -> DisplayStatusText(pullArrowsText)
+        RemoteMatchPhase.PULL_ARROWS -> DisplayStatusText(
+            when (state.activeGroup) {
+                ShootingGroup.AB -> "AB准备"
+                ShootingGroup.CD -> "CD准备"
+                ShootingGroup.NONE -> "请拔箭"
+            },
+        )
         RemoteMatchPhase.FINISHED -> DisplayStatusText("比赛结束")
     }
 }
@@ -555,6 +529,7 @@ fun CountdownScreen(
         match.countdownPhase,
         match.remainingSeconds,
         match.currentLane,
+        match.waitingForNextGroup,
     ) {
         val phase = when (match.timerState) {
             TimerState.READY -> RemoteMatchPhase.WAITING
@@ -565,9 +540,15 @@ fun CountdownScreen(
             TimerState.WAITING_FOR_CONTINUE -> RemoteMatchPhase.PULL_ARROWS
             TimerState.FINISHED -> RemoteMatchPhase.FINISHED
         }
-        val group = if (phase == RemoteMatchPhase.PREPARATION || phase == RemoteMatchPhase.SHOOTING) {
-            if (match.currentLane == Lane.AB) ShootingGroup.AB else ShootingGroup.CD
-        } else ShootingGroup.NONE
+        val group = when {
+            phase == RemoteMatchPhase.PREPARATION || phase == RemoteMatchPhase.SHOOTING -> {
+                if (match.currentLane == Lane.AB) ShootingGroup.AB else ShootingGroup.CD
+            }
+            phase == RemoteMatchPhase.PULL_ARROWS && match.waitingForNextGroup -> {
+                if (match.currentLane.other() == Lane.AB) ShootingGroup.AB else ShootingGroup.CD
+            }
+            else -> ShootingGroup.NONE
+        }
         bluetoothTransport.sendMatch(
             com.example.archerytimer.communication.RemoteMatchState(
                 sequence = 0L,
@@ -630,7 +611,13 @@ fun CountdownScreen(
                     )
                 }
                 TimerState.PAUSED -> StatusWithTrafficLight("暂停中")
-                TimerState.WAITING_FOR_CONTINUE -> StatusWithTrafficLight("请拔箭")
+                TimerState.WAITING_FOR_CONTINUE -> StatusWithTrafficLight(
+                    if (match.waitingForNextGroup) {
+                        "${match.currentLane.other()}准备"
+                    } else {
+                        "请拔箭"
+                    },
+                )
                 TimerState.FINISHED -> StatusWithTrafficLight("比赛结束")
             }
         }

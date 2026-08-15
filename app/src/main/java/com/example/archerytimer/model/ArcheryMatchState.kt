@@ -24,6 +24,9 @@ class ArcheryMatchState(val config: ArcheryConfig) {
     var timerState by mutableStateOf(TimerState.READY)
         private set
 
+    var waitingForNextGroup by mutableStateOf(false)
+        private set
+
     fun start() {
         if (timerState == TimerState.READY) {
             beginCurrentShot()
@@ -52,6 +55,7 @@ class ArcheryMatchState(val config: ArcheryConfig) {
             remainingSeconds = config.countdownSeconds
         } else {
             remainingSeconds = 0
+            waitingForNextGroup = currentShotInRound == 0
             timerState = TimerState.WAITING_FOR_CONTINUE
         }
     }
@@ -75,6 +79,7 @@ class ArcheryMatchState(val config: ArcheryConfig) {
     }
 
     private fun beginCurrentShot() {
+        waitingForNextGroup = false
         countdownPhase = initialPhase()
         remainingSeconds = initialSeconds()
         timerState = TimerState.COUNTING
