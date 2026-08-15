@@ -1,12 +1,9 @@
 package com.example.archerytimer.ui
 
 import android.app.Activity
-import android.Manifest
 import android.content.pm.ActivityInfo
-import android.content.pm.PackageManager
 import android.bluetooth.BluetoothAdapter
 import android.content.Intent
-import android.os.Build
 import android.os.SystemClock
 import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -27,7 +24,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
@@ -67,9 +63,7 @@ import com.example.archerytimer.communication.BluetoothTransport
 import com.example.archerytimer.communication.RemoteMatchPhase
 import com.example.archerytimer.communication.ShootingGroup
 import com.example.archerytimer.audio.BeepPlayer
-import com.example.archerytimer.music.DisplayMusicPlayer
-import com.example.archerytimer.music.LocalMusicRepository
-import com.example.archerytimer.music.MusicCommandHandler
+import com.example.archerytimer.music.AudioReceiver
 import kotlinx.coroutines.delay
 
 @Composable
@@ -137,47 +131,13 @@ fun BluetoothMatchingScreen(
 @Composable
 fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
     val activity = LocalContext.current as? Activity
-    val context = LocalContext.current
-    val audioPermission = if (Build.VERSION.SDK_INT >= 33) {
-        Manifest.permission.READ_MEDIA_AUDIO
-    } else {
-        Manifest.permission.READ_EXTERNAL_STORAGE
-    }
-    var permissionResolved by remember {
-        mutableStateOf(context.checkSelfPermission(audioPermission) == PackageManager.PERMISSION_GRANTED)
-    }
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) {
-        permissionResolved = true
-    }
     val discoverableLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { }
 
-    LaunchedEffect(audioPermission) {
-        if (!permissionResolved) permissionLauncher.launch(audioPermission)
-    }
-
-    if (!permissionResolved) {
-        Box(
-            modifier = Modifier.fillMaxSize().background(DisplayBackground),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("正在请求本地音乐权限", color = Color.White, fontSize = 28.sp)
-        }
-        return
-    }
-
     val transport = bluetoothTransport
     val viewModel = remember { DisplayViewModel(transport) }
-    val musicHandler = remember {
-        MusicCommandHandler(
-            LocalMusicRepository(context.applicationContext),
-            DisplayMusicPlayer(context.applicationContext),
-            transport,
-        )
-    }
+    val audioReceiver = remember { AudioReceiver() }
     val beepPlayer = remember { BeepPlayer() }
     val uiState by viewModel.uiState.collectAsState(initial = DisplayUiState())
     var showExitDialog by remember { mutableStateOf(false) }
@@ -195,7 +155,7 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
     }
     LaunchedEffect(uiState.beepEventId) {
         if (uiState.beepEventId > 0L) {
-            musicHandler.setMusicDucked(true)
+            audioReceiver.setDucked(true)
             try {
                 delay(80)
                 repeat(uiState.beepCount) {
@@ -203,12 +163,12 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
                     delay(380)
                 }
             } finally {
-                musicHandler.setMusicDucked(false)
+                audioReceiver.setDucked(false)
             }
         }
     }
     DisposableEffect(activity) {
-        viewModel.onMusicCommand = musicHandler::handle
+        audioReceiver.start()
         bluetoothTransport.startDisplayServer()
         discoverableLauncher.launch(
             Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).putExtra(
@@ -222,8 +182,7 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             beepPlayer.release()
-            viewModel.onMusicCommand = {}
-            musicHandler.release()
+            audioReceiver.stop()
             bluetoothTransport.disconnect()
         }
     }
@@ -393,6 +352,7 @@ fun ControlSetupScreen(
     onConfirmed: (ArcheryConfig) -> Unit,
     onBack: () -> Unit,
     controlMusic: ControlMusicState,
+    onStartMusic: () -> Unit,
     bluetoothTransport: BluetoothTransport,
 ) {
     var totalArrows by remember { mutableStateOf("72") }
@@ -402,7 +362,6 @@ fun ControlSetupScreen(
     var firstLane by remember { mutableStateOf(Lane.AB) }
     var error by remember { mutableStateOf<String?>(null) }
     val musicState by controlMusic.uiState.collectAsState(initial = ControlMusicUiState())
-    var showMusicDialog by remember { mutableStateOf(false) }
 
     BackHandler(onBack = onBack)
 
@@ -422,7 +381,7 @@ fun ControlSetupScreen(
                 modifier = Modifier.clickable(onClick = onBack)
                     .padding(vertical = 10.dp, horizontal = 4.dp),
             )
-            ControlMusicPanel(controlMusic, musicState) { showMusicDialog = true }
+            ControlMusicPanel(controlMusic, musicState, onStartMusic)
         }
         Text("比赛参数设置", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(24.dp))
@@ -468,13 +427,6 @@ fun ControlSetupScreen(
         }
     }
 
-    if (showMusicDialog) {
-        MusicLibraryDialog(
-            musicState = musicState,
-            controlMusic = controlMusic,
-            onDismiss = { showMusicDialog = false },
-        )
-    }
 }
 
 @Composable
@@ -493,6 +445,7 @@ private fun NumberField(label: String, value: String, onValueChange: (String) ->
 fun CountdownScreen(
     config: ArcheryConfig,
     controlMusic: ControlMusicState,
+    onStartMusic: () -> Unit,
     bluetoothTransport: BluetoothTransport,
     onExitConfirmed: () -> Unit,
 ) {
@@ -500,7 +453,6 @@ fun CountdownScreen(
     var showExitDialog by remember { mutableStateOf(false) }
     var resumeAfterDialog by remember { mutableStateOf(false) }
     val musicState by controlMusic.uiState.collectAsState(initial = ControlMusicUiState())
-    var showMusicDialog by remember { mutableStateOf(false) }
 
     fun requestExit() {
         if (showExitDialog) return
@@ -578,7 +530,7 @@ fun CountdownScreen(
                     .clickable(onClick = ::requestExit)
                     .padding(vertical = 10.dp, horizontal = 4.dp),
             )
-            ControlMusicPanel(controlMusic, musicState) { showMusicDialog = true }
+            ControlMusicPanel(controlMusic, musicState, onStartMusic)
         }
         Box(
             modifier = Modifier
@@ -658,32 +610,24 @@ fun CountdownScreen(
         )
     }
 
-    if (showMusicDialog) {
-        MusicLibraryDialog(
-            musicState = musicState,
-            controlMusic = controlMusic,
-            onDismiss = { showMusicDialog = false },
-        )
-    }
 }
 
 @Composable
 private fun ControlMusicPanel(
     controlMusic: ControlMusicState,
     musicState: ControlMusicUiState,
-    onOpenLibrary: () -> Unit,
+    onStartMusic: () -> Unit,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier.size(42.dp).clickable {
-                onOpenLibrary()
-                controlMusic.requestLibrary()
+                if (musicState.active) controlMusic.disconnect() else onStartMusic()
             },
             contentAlignment = Alignment.Center,
         ) {
             Text("♫", color = Color.Black, fontSize = 30.sp)
         }
-        if (musicState.trackId != null) {
+        if (musicState.active) {
             Spacer(Modifier.height(4.dp))
             Row(
                 modifier = Modifier
@@ -695,46 +639,11 @@ private fun ControlMusicPanel(
                 CompactMusicButton(
                     if (musicState.isPlaying) "Ⅱ" else "▶",
                     if (musicState.isPlaying) "暂停" else "继续",
-                ) { controlMusic.togglePlayback(musicState.isPlaying) }
+                ) { controlMusic.togglePlayback() }
                 CompactMusicButton("▶|", "下一首", controlMusic::next)
             }
         }
     }
-}
-
-@Composable
-private fun MusicLibraryDialog(
-    musicState: ControlMusicUiState,
-    controlMusic: ControlMusicState,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = DialogBackground,
-        title = { Text("显示端本地音乐", color = Color.Black) },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 440.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                when {
-                    musicState.error != null -> Text(musicState.error ?: "加载失败", color = Color.Black)
-                    !musicState.libraryLoaded -> Text("正在加载…", color = Color.Black)
-                    musicState.tracks.isEmpty() -> Text("显示端没有可用的本地音乐", color = Color.Black)
-                    else -> musicState.tracks.forEach { track ->
-                        Text(
-                            text = "${track.title} · ${track.artist}",
-                            color = Color.Black,
-                            modifier = Modifier.fillMaxWidth()
-                                .clickable { controlMusic.play(track.trackId) }
-                                .padding(vertical = 10.dp),
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = { DialogButton("关闭", onDismiss) },
-    )
 }
 
 @Composable

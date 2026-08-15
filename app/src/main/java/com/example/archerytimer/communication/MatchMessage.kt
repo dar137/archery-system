@@ -31,5 +31,4 @@ enum class ConnectionState {
 sealed interface DisplayMessage {
     data class ConnectionChanged(val state: ConnectionState) : DisplayMessage
     data class MatchStateChanged(val state: RemoteMatchState) : DisplayMessage
-    data class MusicCommandReceived(val command: MusicCommand) : DisplayMessage
 }

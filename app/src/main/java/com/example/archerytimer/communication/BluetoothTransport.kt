@@ -15,8 +15,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,13 +40,11 @@ data class BluetoothUiState(
     val error: String? = null,
 )
 
-class BluetoothTransport(context: Context) : DisplayTransport, MusicControlTransport {
+class BluetoothTransport(context: Context) : DisplayTransport {
     private val appContext = context.applicationContext
     private val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val displayFlow = MutableSharedFlow<DisplayMessage>(extraBufferCapacity = 64)
-    private val responseFlow = MutableSharedFlow<MusicResponse>(extraBufferCapacity = 32)
-    override val responses: Flow<MusicResponse> = responseFlow.asSharedFlow()
     private var socket: BluetoothSocket? = null
     private var serverSocket: BluetoothServerSocket? = null
     private var readerJob: Job? = null
@@ -181,7 +179,6 @@ class BluetoothTransport(context: Context) : DisplayTransport, MusicControlTrans
             while (true) {
                 val line = reader.readLine() ?: break
                 BluetoothMessageCodec.decodeDisplay(line)?.let { displayFlow.emit(it) }
-                    ?: BluetoothMessageCodec.decodeResponse(line)?.let { responseFlow.emit(it) }
             }
             disconnect()
         }
@@ -190,15 +187,13 @@ class BluetoothTransport(context: Context) : DisplayTransport, MusicControlTrans
     fun sendMatch(state: RemoteMatchState) = write(
         BluetoothMessageCodec.encodeMatch(state.copy(sequence = matchSequence.incrementAndGet())),
     )
-    override fun send(command: MusicCommand) = write(BluetoothMessageCodec.encodeCommand(command))
-    override fun send(response: MusicResponse) = write(BluetoothMessageCodec.encodeResponse(response))
 
     @Synchronized
     private fun write(line: String) {
         if (socket != null) outgoing.trySend(line)
     }
 
-    override fun disconnect() {
+    fun disconnect() {
         readerJob?.cancel(); readerJob = null
         writerJob?.cancel(); writerJob = null
         runCatching { socket?.close() }; socket = null
@@ -206,7 +201,7 @@ class BluetoothTransport(context: Context) : DisplayTransport, MusicControlTrans
         stateFlow.value = stateFlow.value.copy(connectionState = ConnectionState.MATCHING)
     }
 
-    override fun release() {
+    fun release() {
         disconnect()
         runCatching { appContext.unregisterReceiver(receiver) }
         scope.cancel()

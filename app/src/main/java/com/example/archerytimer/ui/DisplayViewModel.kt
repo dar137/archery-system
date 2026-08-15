@@ -16,8 +16,6 @@ data class DisplayUiState(
 )
 
 class DisplayViewModel(private val transport: DisplayTransport) {
-    var onMusicCommand: (com.example.archerytimer.communication.MusicCommand) -> Unit = {}
-
     val uiState: Flow<DisplayUiState> = transport.messages().scan(DisplayUiState()) { current, message ->
         when (message) {
             is DisplayMessage.ConnectionChanged -> current.copy(connectionState = message.state)
@@ -36,10 +34,6 @@ class DisplayViewModel(private val transport: DisplayTransport) {
                 } else {
                     current
                 }
-            }
-            is DisplayMessage.MusicCommandReceived -> {
-                onMusicCommand(message.command)
-                current
             }
         }
     }
