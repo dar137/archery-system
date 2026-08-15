@@ -4,7 +4,7 @@ import android.media.AudioManager
 import android.media.ToneGenerator
 
 class BeepPlayer {
-    private val toneGenerator = ToneGenerator(AudioManager.STREAM_MUSIC, 85)
+    private val toneGenerator = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
     private var released = false
 
     fun play() {
