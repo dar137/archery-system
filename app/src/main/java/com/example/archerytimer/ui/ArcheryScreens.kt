@@ -198,8 +198,10 @@ fun DisplayScreen(bluetoothTransport: BluetoothTransport, onBack: () -> Unit) {
             musicHandler.setMusicDucked(true)
             try {
                 delay(80)
-                beepPlayer.play()
-                delay(380)
+                repeat(uiState.beepCount) {
+                    beepPlayer.play()
+                    delay(380)
+                }
             } finally {
                 musicHandler.setMusicDucked(false)
             }
