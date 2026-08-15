@@ -9,7 +9,7 @@ class BeepPlayer {
 
     fun play() {
         if (!released) {
-            toneGenerator.startTone(ToneGenerator.TONE_DTMF_D, 300)
+            toneGenerator.startTone(ToneGenerator.TONE_DTMF_D, 700)
         }
     }
 
